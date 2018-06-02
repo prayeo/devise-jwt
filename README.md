@@ -68,3 +68,111 @@ $ rails db:migate
    -> 0.0031s
 == 20180602065912 DeviseCreateUsers: migrated (0.0289s) =======================
 ```
+
+
+
+### 3. Configuring devise for APIs
+
+#### 먼저, Responding to `json` 해주고 
+
+API에 속하지 않은 ActionController::MimeResponds 기능 다시 불러오기
+
+```ruby
+# app/controllers/application_controller.rb
+
+class ApplicationController < ActionController::API
+  include ActionController::MimeResponds # 추가
+  respond_to :json # 추가
+end
+```
+
+
+
+#### my_application_sessions controller 생성
+
+```bash
+$ rails g controller my_application_sessions
+```
+
+devise sessions 을 받아오게끔 수정
+
+```ruby
+#class MyApplicationSessionsController < ApplicationController =>
+class MyApplicationSessionsController < Devise::SessionsController
+  def create
+    super { |resource| @resource = resource }
+  end
+end
+```
+
+잊지말고 route 도 수정! 
+
+```ruby
+# config/routes.rb
+
+Rails.application.routes.draw do
+  # devise_for :users =>
+  devise_for :users, controllers: { sessions: 'my_application_sessions' }, defaults: { format: :json } # defaults format은 url 끝에 .json을 안붙여도 설정해줌.
+end
+```
+
+
+
+#### View 관련 Validation errors format
+
+responder.rb 이용
+
+```ruby
+# app/controllers/concerns/my_application_responder.rb 생성
+
+module MyApplicationResponder
+  protected
+
+  def json_resource_errors
+    {
+      success: false,
+      errors: MyApplicationErrorFormatter.call(resource.errors)
+    }
+  end
+end
+```
+
+```ruby
+# app/controllers/my_application_sessions_controller.rb
+
+class MyApplicationSessionsController < Devise::SessionsController
+  responders :my_application # 추가
+
+  def create
+    super { |resource| @resource = resource }
+  end
+end
+```
+
+#### Authentication errors format
+
+```ruby
+# app/controllers/concerns/my_application_failure_app.rb 생성
+
+class MyApplicationFailureApp < Devise::FailureApp
+  def http_auth_body
+    return super unless request_format == :json
+    {
+      sucess: false,
+      message: i18n_message
+    }.to_json
+  end
+end
+```
+
+```ruby
+# config/initializers/devise.rb
+Devise.setup do |config|
+	...
+  config.warden do |manager|
+      manager.failure_app = MyApplicationFailureApp
+  end
+  ...
+end
+```
+
